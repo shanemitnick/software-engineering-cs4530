@@ -10,6 +10,7 @@ import addTownRoutes from '../router/towns';
 import * as requestHandlers from '../requestHandlers/CoveyTownRequestHandlers';
 import { createConversationForTesting } from './TestUtils';
 import TownsServiceClient, { ServerConversationArea } from './TownsServiceClient';
+import PlayerSession from '../types/PlayerSession';
 
 type TestTownData = {
   friendlyName: string;
@@ -68,9 +69,30 @@ describe('Create Conversation Area API', () => {
       sessionToken: testingSession.coveySessionToken,
     });
   });
+
+  it('should throw an error when it cant make a CA', async () => {
+    const testingTown = await createTownForTesting(undefined, true);
+    const testingSession = await apiClient.joinTown({
+      userName: nanoid(),
+      coveyTownID: testingTown.coveyTownID,
+    });
+
+    spyOn(requestHandlers, 'conversationAreaCreateHandler').and.returnValue({
+      isOk: false,
+      response: {},
+      message: 'Error creating conversation area',
+    });
+
+    await expect(
+      apiClient.createConversationArea({
+        conversationArea: createConversationForTesting(),
+        sessionToken: testingSession.coveySessionToken,
+        coveyTownID: testingTown.coveyTownID,
+      }),
+    ).rejects.toThrow('Error processing request: Error creating conversation area');
+  });
 });
 describe('conversationAreaCreateHandler', () => {
-
   const mockCoveyTownStore = mock<CoveyTownsStore>();
   const mockCoveyTownController = mock<CoveyTownController>();
   beforeAll(() => {
@@ -83,9 +105,14 @@ describe('conversationAreaCreateHandler', () => {
     mockReset(mockCoveyTownStore);
     mockCoveyTownStore.getControllerForTown.mockReturnValue(mockCoveyTownController);
   });
-  it('Checks for a valid session token before creating a conversation area', ()=>{
+  it('Checks for a valid session token before creating a conversation area', () => {
     const coveyTownID = nanoid();
-    const conversationArea :ServerConversationArea = { boundingBox: { height: 1, width: 1, x:1, y:1 }, label: nanoid(), occupantsByID: [], topic: nanoid() };
+    const conversationArea: ServerConversationArea = {
+      boundingBox: { height: 1, width: 1, x: 1, y: 1 },
+      label: nanoid(),
+      occupantsByID: [],
+      topic: nanoid(),
+    };
     const invalidSessionToken = nanoid();
 
     // Make sure to return 'undefined' regardless of what session token is passed
@@ -98,5 +125,28 @@ describe('conversationAreaCreateHandler', () => {
     });
     expect(mockCoveyTownController.getSessionByToken).toBeCalledWith(invalidSessionToken);
     expect(mockCoveyTownController.addConversationArea).not.toHaveBeenCalled();
+  });
+
+  it('should fail when adding an area to the town fails', () => {
+    const coveyTownID = nanoid();
+    const conversationArea: ServerConversationArea = {
+      boundingBox: { height: 10, width: 10, x: 15, y: 15 },
+      label: nanoid(),
+      occupantsByID: [],
+      topic: nanoid(),
+    };
+    const mockSession = mock<PlayerSession>();
+    mockCoveyTownController.getSessionByToken.mockReturnValueOnce(mockSession);
+    // force controller to return false
+    mockCoveyTownController.addConversationArea.mockReturnValueOnce(false);
+
+    const res = requestHandlers.conversationAreaCreateHandler({
+      conversationArea,
+      coveyTownID,
+      sessionToken: nanoid(),
+    });
+
+    expect(res.isOK).toBe(false);
+    expect(res.message).toContain('Unable to create conversation');
   });
 });
